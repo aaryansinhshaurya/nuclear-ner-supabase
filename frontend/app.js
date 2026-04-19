@@ -289,27 +289,91 @@ function setUploadStatus(msg, err=false) {
 function parseFile(text, filename) {
   const ext = filename.split(".").pop().toLowerCase();
 
+  // ── JSON handling (unchanged) ─────────────────────────
   if (ext === "json") {
     const raw = JSON.parse(text);
     if (Array.isArray(raw)) return normaliseArray(raw);
-    // Nested: { doc_id: { sent_id: { text, entities } } }
+
     const out = [];
     for (const [docId, sents] of Object.entries(raw)) {
       for (const [sentId, val] of Object.entries(sents)) {
-        out.push({ doc_id: docId, sent_id: sentId, text: val.text || val.sentence || "", entities: normaliseEntities(val.entities || []) });
+        out.push({
+          doc_id: docId,
+          sent_id: sentId,
+          text: val.text || val.sentence || "",
+          entities: normaliseEntities(val.entities || [])
+        });
       }
     }
     return out;
   }
 
+  // ── CSV / TSV ─────────────────────────────────────────
+  const sep = ext === "tsv" ? "\t" : ",";
+  const lines = text.trim().split(/\r?\n/);
+
+  if (!lines.length) throw new Error("Empty file");
+
+  const headers = parseCsvRow(lines[0], sep).map(h => h.toLowerCase().trim());
+
+  // ✅ STRICT HEADER MATCH (your format only)
+  if (
+    headers[0] !== "doc_id" ||
+    headers[1] !== "sentence_id" ||
+    headers[2] !== "sentence" ||
+    headers[3] !== "entities"
+  ) {
+    throw new Error("CSV must have EXACT headers: doc_id,sentence_id,sentence,entities");
+  }
+
+  const out = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+
+    const cols = parseCsvRow(line, sep);
+
+    const doc_id  = cols[0];
+    const sent_id = cols[1];
+    const textVal = cols[2];
+
+    if (!textVal) continue; // skip bad rows
+
+    let entities = [];
+    if (cols[3]) {
+      try {
+        entities = normaliseEntities(JSON.parse(cols[3]));
+      } catch (e) {
+        console.warn("Bad entity JSON at row", i);
+      }
+    }
+
+    out.push({
+      doc_id,
+      sent_id,
+      text: textVal,
+      entities
+    });
+  }
+
+  return out;
+}
   // CSV / TSV
   const sep = ext === "tsv" ? "\t" : ",";
   const lines = text.trim().split(/\r?\n/);
   const headers = parseCsvRow(lines[0], sep).map(h => h.toLowerCase().trim());
-  const docCol  = headers.findIndex(h => h.includes("doc"));
-  const sentCol = headers.findIndex(h => h.includes("sent") || h.includes("id"));
-  const txtCol  = headers.findIndex(h => h.includes("text") || h.includes("sentence"));
-  const entCol  = headers.findIndex(h => h.includes("entit"));
+
+   // STRICT mapping using exact column names
+   const docCol  = headers.indexOf("doc_id");
+   const sentCol = headers.indexOf("sentence_id");
+   const txtCol  = headers.indexOf("sentence");
+   const entCol  = headers.indexOf("entities");
+   
+   // Optional safety check
+   if (docCol === -1 || sentCol === -1 || txtCol === -1) {
+     throw new Error("CSV must have headers: doc_id, sentence_id, sentence, entities");
+   }
 
   if (txtCol === -1) throw new Error("Could not find a text/sentence column in CSV.");
 
