@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NukeNER VIZ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- ══ Supabase JS client (loaded from CDN — no npm/build needed) ══ -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<link rel="stylesheet" href="style.css">
+
+<script>
+  // ╔══════════════════════════════════════════════════════╗
+  // ║  STEP 3 — FILL IN YOUR SUPABASE CREDENTIALS HERE    ║
+  // ║                                                      ║
+  // ║  Find them at: supabase.com → your project →        ║
+  // ║  Settings → API                                      ║
+  // ╚══════════════════════════════════════════════════════╝
+  const SUPABASE_URL = "https://xwqcbwieteyycghvbcpg.supabase.co";  // ← replace
+  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh3cWNid2lldGV5eWNnaHZiY3BnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1OTkxODksImV4cCI6MjA5MjE3NTE4OX0.Hjw-GGd3pt9-EcatJlDxrbvXQAqdHx2W-w4un7AGRDg";         // ← replace (anon public key)
+</script>
+</head>
+<body>
+
+<!-- ══ PROJECT PICKER MODAL ══════════════════════════════ -->
+<div class="overlay" id="overlay">
+  <div class="modal glass">
+    <div class="modal-header">
+      <span class="modal-logo">☢️ NukeNER VIZ</span>
+      <button class="icon-btn" onclick="hideModal()" aria-label="Close">×</button>
+    </div>
+    <p class="modal-desc">Upload a CSV/JSON file to start a new project, or open an existing one.</p>
+
+    <div id="backendStatus" class="status-line"></div>
+
+    <label class="field-label">Your name <span class="req">*</span></label>
+    <input class="field" id="userName" placeholder="e.g. Alice">
+
+    <div class="divider-row">
+      <hr class="divider"><span class="divider-label">New project</span><hr class="divider">
+    </div>
+
+    <label class="field-label">Project name <span class="opt">(optional)</span></label>
+    <input class="field" id="newProjectName" placeholder="My NER Project">
+
+    <label class="upload-zone" id="uploadZone">
+      <input type="file" id="uploadFileInput" accept=".csv,.json,.tsv,.txt" style="display:none">
+      <div class="upload-icon">📂</div>
+      <div class="upload-label">Click to upload or drag & drop</div>
+      <div class="upload-sub">CSV · JSON · TSV</div>
+    </label>
+    <div id="uploadStatus" class="status-line"></div>
+
+    <div class="divider-row">
+      <hr class="divider"><span class="divider-label">Existing projects</span><hr class="divider">
+    </div>
+
+    <div class="project-list" id="projectList">
+      <div class="empty-state">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ APP SHELL ══════════════════════════════════════════ -->
+<div class="shell">
+
+  <!-- Topbar -->
+  <header class="topbar glass">
+    <div class="topbar-brand">
+      <span class="brand-icon">🏷️</span>
+      <div>
+        <div class="brand-name">NukeNER VIZ</div>
+        <div class="brand-sub" id="projectSubtitle">No project open</div>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div class="stat-row" id="statRow" style="display:none">
+        <span class="chip" id="sDoc">0 docs</span>
+        <span class="chip" id="sSent">0 sentences</span>
+        <span class="chip" id="sEnt">0 entities</span>
+        <span class="chip" id="sType">0 types</span>
+      </div>
+
+      <div class="user-pill" id="userPill" style="display:none" onclick="showModal()">
+        <div class="avatar" id="userAvatar">?</div>
+        <span id="userPillName">You</span>
+      </div>
+
+      <button class="btn btn-ghost" onclick="showModal(); loadProjectList()">⊕ Projects</button>
+    </div>
+  </header>
+
+  <!-- Body -->
+  <div class="body-row">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="panel glass-sm">
+        <div class="panel-header">
+          Documents
+          <span class="badge" id="docCountBadge">0</span>
+        </div>
+        <div class="doc-list" id="docList"></div>
+      </div>
+
+      <div class="panel glass-sm" id="legendCard" style="display:none">
+        <div class="panel-header">
+          Entity Types
+          <div class="btn-group">
+            <button class="btn-tiny" onclick="selectAllLabels()">All</button>
+            <button class="btn-tiny" onclick="deselectAllLabels()">None</button>
+          </div>
+        </div>
+        <div class="legend-list" id="legendItems"></div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <div class="glass main-card">
+
+        <!-- Main titlebar -->
+        <div class="main-header" id="mainHeader" style="display:none">
+          <div class="main-doc-title" id="mainDocTitle">—</div>
+          <span class="badge" id="mainDocBadge"></span>
+          <span class="progress-chip" id="progressChip">0/0 reviewed</span>
+
+          <div class="tabs" style="margin-left:auto">
+            <button class="tab active" data-tab="annotate" onclick="showTab('annotate')">Annotate</button>
+            <button class="tab" data-tab="metrics"  onclick="showTab('metrics')">Metrics</button>
+            <button class="tab" data-tab="team"     onclick="showTab('team')">Team</button>
+          </div>
+        </div>
+
+        <!-- Scrollable area -->
+        <div class="main-body" id="mainBody">
+
+          <!-- Welcome -->
+          <div class="welcome" id="welcomeState">
+            <div class="welcome-glyph">✦</div>
+            <h2>Open a project to begin</h2>
+            <p>Create or open a project using the <strong>⊕ Projects</strong> button above,<br>
+               or drag &amp; drop a file anywhere on the page.</p>
+            <div class="format-hint">
+              <div class="hint-block"><strong>CSV</strong><br>doc_id, sentence_id, sentence, entities<br><code>entities: [{"text":"...","label":"..."}]</code></div>
+              <div class="hint-block"><strong>JSON array</strong><br><code>[{"doc_id":"...","sentence":"...","entities":[...]}]</code></div>
+              <div class="hint-block"><strong>JSON nested</strong><br><code>{"doc_id":{"sent_id":{"text":"...","entities":[...]}}}</code></div>
+            </div>
+          </div>
+
+          <div id="sentencePane"></div>
+          <div id="metricsPanel"></div>
+          <div id="teamPanel"></div>
+
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
