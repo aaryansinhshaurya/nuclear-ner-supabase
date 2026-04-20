@@ -333,10 +333,11 @@ body::before {
 
 /* Wrapper: inline-block so it can anchor the absolute bar */
 .ent-wrap {
-  display: inline-block;
   position: relative;
-  margin-top: 18px;        /* headroom for the bar above */
+  display: inline-block;
+  margin-top: 18px;
   vertical-align: bottom;
+  pointer-events: auto;
 }
 
 /* The highlighted entity text */
@@ -362,11 +363,13 @@ body::before {
   padding: 2px 4px 2px 7px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.13);
   white-space: nowrap;
-  z-index: 50;             /* low z — won't cover sidebar */
+  z-index: 9999;              /* 🔥 VERY IMPORTANT */
   pointer-events: auto;
-  animation: barPop 0.1s ease both;
 }
-.ent-wrap:hover .ent-bar { display: inline-flex; }
+.ent-wrap:hover .ent-bar,
+.ent-bar:hover {
+  display: inline-flex;
+}
 
 @keyframes barPop {
   from { opacity:0; transform: translateX(-50%) translateY(4px); }
