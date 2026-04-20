@@ -358,10 +358,11 @@ function parseFile(text, filename) {
           //   ' after [ { , :   →  "    (opening quote of a key or value)
           //   ' before ] } , :  →  "    (closing quote of a key or value)
           const fixed = raw
-            .replace(/'/g, '"')            // blanket replace all '  → "
-            .replace(/None/g, "null")
-            .replace(/True/g, "true")
-            .replace(/False/g, "false");
+            .replace(/([{,]\s*)'([^']+?)'\s*:/g, '$1"$2":')   // fix keys
+            .replace(/:\s*'([^']*?)'/g, ':"$1"')              // fix values
+            .replace(/\bNone\b/g, "null")
+            .replace(/\bTrue\b/g, "true")
+            .replace(/\bFalse\b/g, "false");
           try { parsed = JSON.parse(fixed); } catch(_) {}
         }
 
@@ -375,7 +376,9 @@ function parseFile(text, filename) {
       }
     }
     return {
-      doc_id:   docCol  !== -1 ? cols[docCol]  : "doc_1",
+      doc_id: docCol !== -1 && cols[docCol]
+      ? cols[docCol]
+      : `doc_${Math.floor(i / 50)}`, // fallback grouping
       sent_id:  sentCol !== -1 ? cols[sentCol] : String(i),
       text:     txtCol  !== -1 ? cols[txtCol]  : "",
       entities,
@@ -649,8 +652,7 @@ function buildSentHTML(sent) {
     const span = ent.span_text || "";
     if (!span) continue;
     // Try exact match first, then case-insensitive
-    let idx = text.indexOf(span);
-    if (idx === -1) idx = textLower.indexOf(span.toLowerCase());
+    let idx = text.toLowerCase().indexOf(span.toLowerCase());
     if (idx !== -1) located.push({ ent, start: idx, end: idx + span.length });
   }
   // Sort by start position; remove overlaps
