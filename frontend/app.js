@@ -666,22 +666,20 @@ function buildEntitySpan(ent) {
   const verdict = S.annotations[ent.id] || "none";
   const saving  = S.saving.has(ent.id);
   const dis     = saving ? "disabled" : "";
-  // Short label: strip the "Category [SubType]" wrapper if present, show just SubType or full label
-  const bracketMatch = ent.label.match(/\[([^\]]+)\]/);
-  const shortLabel = bracketMatch ? bracketMatch[1] : ent.label;
-  const tooltip = `<span class="ent-label-tip">${esc(shortLabel)}</span>`;
   const tpActive = verdict === "tp";
   const fpActive = verdict === "fp";
-  const toggleBar = `<span class="ent-toggle" onclick="event.stopPropagation()">
-    ${tooltip}
-    <button class="ent-btn ent-tp ${tpActive?"ent-active-tp":""}" ${dis} onclick="setVerdict('${escA(ent.id)}','tp',event)" title="True Positive">TP</button>
-    <button class="ent-btn ent-fp ${fpActive?"ent-active-fp":""}" ${dis} onclick="setVerdict('${escA(ent.id)}','fp',event)" title="False Positive">FP</button>
-  </span>`;
-  return `<span class="entity verdict-${verdict}" data-type="${escA(ent.label)}" data-eid="${escA(ent.id)}">${toggleBar}${esc(ent.span_text)}</span>`;
+  // Inline pill: [span text]  TP  FP  — all on same line, no popups, no absolutes
+  return `<span class="entity verdict-${verdict}" data-type="${escA(ent.label)}" data-eid="${escA(ent.id)}"
+    >${esc(ent.span_text)}<span class="ent-btns" onclick="event.stopPropagation()"
+    ><button class="ent-btn ent-tp ${tpActive?"ent-active-tp":""}" ${dis}
+        onclick="setVerdict('${escA(ent.id)}','tp',event)" title="True Positive">TP</button
+    ><button class="ent-btn ent-fp ${fpActive?"ent-active-fp":""}" ${dis}
+        onclick="setVerdict('${escA(ent.id)}','fp',event)" title="False Positive">FP</button
+    ></span></span>`;
 }
 
-function toggleMenu() {}  // no-op — kept for compatibility
-function closeMenu()   {}  // no-op
+function toggleMenu() {}
+function closeMenu()   {}
 
 async function setVerdict(id, verdict, ev) {
   ev.stopPropagation();
