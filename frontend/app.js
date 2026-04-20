@@ -579,11 +579,16 @@ function updateStats() {
 function buildDocList() {
   _qs("docCountBadge").textContent = S.docsMap.size;
   _qs("docList").innerHTML = [...S.docsMap.entries()].map(([docId, sents]) => `
-    <div class="doc-item" data-doc="${escA(docId)}" onclick="selectDoc('${escA(docId)}')">
+    <div class="doc-item" data-doc="${escA(docId)}">
       <div class="doc-pip"></div>
       <div class="doc-name" title="${escA(docId)}">${esc(docId)}</div>
       <div class="doc-count">${sents.length}</div>
     </div>`).join("");
+  // Event delegation — no inline onclick, handles any docId safely
+  _qs("docList").onclick = e => {
+    const item = e.target.closest(".doc-item");
+    if (item) selectDoc(item.dataset.doc);
+  };
 }
 
 function selectDoc(docId) {
@@ -662,20 +667,16 @@ function buildSentHTML(sent) {
 }
 
 function buildEntitySpan(ent) {
-  const s       = getStyle(ent.label);
-  const verdict = S.annotations[ent.id] || "none";
-  const saving  = S.saving.has(ent.id);
-  const dis     = saving ? "disabled" : "";
+  const s        = getStyle(ent.label);
+  const verdict  = S.annotations[ent.id] || "none";
+  const saving   = S.saving.has(ent.id);
+  const dis      = saving ? "disabled" : "";
   const tpActive = verdict === "tp";
   const fpActive = verdict === "fp";
-  // Inline pill: [span text]  TP  FP  — all on same line, no popups, no absolutes
-  return `<span class="entity verdict-${verdict}" data-type="${escA(ent.label)}" data-eid="${escA(ent.id)}"
-    >${esc(ent.span_text)}<span class="ent-btns" onclick="event.stopPropagation()"
-    ><button class="ent-btn ent-tp ${tpActive?"ent-active-tp":""}" ${dis}
-        onclick="setVerdict('${escA(ent.id)}','tp',event)" title="True Positive">TP</button
-    ><button class="ent-btn ent-fp ${fpActive?"ent-active-fp":""}" ${dis}
-        onclick="setVerdict('${escA(ent.id)}','fp',event)" title="False Positive">FP</button
-    ></span></span>`;
+  const bracketMatch = ent.label.match(/\[([^\]]+)\]/);
+  const shortLabel   = bracketMatch ? bracketMatch[1] : ent.label;
+  // .ent-wrap gives us a relative container inline so the above-bar positions correctly
+  return `<span class="ent-wrap"><span class="entity verdict-${verdict}" data-type="${escA(ent.label)}" data-eid="${escA(ent.id)}">${esc(ent.span_text)}</span><span class="ent-bar" onclick="event.stopPropagation()"><span class="ent-label-tip">${esc(shortLabel)}</span><button class="ent-btn ent-tp ${tpActive?"ent-active-tp":""}" ${dis} onclick="setVerdict('${escA(ent.id)}','tp',event)">TP</button><button class="ent-btn ent-fp ${fpActive?"ent-active-fp":""}" ${dis} onclick="setVerdict('${escA(ent.id)}','fp',event)">FP</button></span></span>`;
 }
 
 function toggleMenu() {}
