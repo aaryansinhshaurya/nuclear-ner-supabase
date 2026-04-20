@@ -391,15 +391,30 @@ async function openProject(pid, name="") {
       .eq("project_id", pid).eq("user_name", S.user)
       .then(({ data, error }) => { if (error) throw error; return data; });
 
-    const allPages = await Promise.all([...pageRequests, annRequest]);
-    const anns  = allPages.pop();
-    const sents = allPages.flat();
+    const allAnnRequest = sb.from("annotations")
+      .select("model_entity_id, verdict, user_name")
+      .eq("project_id", pid)
+      .then(({ data, error }) => { if (error) throw error; return data; });
+
+    const allPages = await Promise.all([...pageRequests, annRequest, allAnnRequest]);
+    const allAnns = allPages.pop();
+    const anns    = allPages.pop();
+    const sents   = allPages.flat();
+
+    // Debug: log first sentence to verify text field is populated
+    if (sents.length > 0) console.log("[NukeNER] Sample sentence:", sents[0]);
 
     S.sentences = sents.map(s => ({
-      id: s.id, doc_id: s.doc_id, sent_id: s.sent_id, text: s.text,
+      id: s.id, doc_id: s.doc_id, sent_id: s.sent_id,
+      // Fallback: if text is null/empty, show a placeholder so the card isn't blank
+      text: s.text || s.sentence || "",
       entities: (s.entities || []).map(e => ({ ...e, id: e.model_entity_id })),
     }));
     for (const a of anns) S.annotations[a.model_entity_id] = a.verdict;
+    for (const a of allAnns) {
+      if (!S.allAnnotations[a.model_entity_id]) S.allAnnotations[a.model_entity_id] = [];
+      S.allAnnotations[a.model_entity_id].push({ user_name: a.user_name, verdict: a.verdict });
+    }
   } catch(e) {
     alert("Failed to load project: " + e.message); showModal(); return;
   }
@@ -479,19 +494,27 @@ function renderSentences(docId) {
   _qs("sentencePane").innerHTML = sents.map(sent => `
     <div class="sent-card">
       <div class="sent-meta">${esc(sent.doc_id)} · ${esc(sent.sent_id)}</div>
-      <div class="sent-text">${buildSentHTML(sent)}</div>
+      <div class="sent-text">${sent.text ? buildSentHTML(sent) : `<span style="color:var(--t2);font-style:italic;font-size:13px">⚠️ No text stored — check your CSV has a "text" or "sentence" column, and that the Supabase <code>sentences.text</code> column is not empty.</span>`}</div>
     </div>`).join("");
   _qs("mainBody").scrollTop = 0;
   applyVisibility();
 }
 
 function buildSentHTML(sent) {
-  const text = sent.text;
+  const text = sent.text || "";
   const ents = [...sent.entities].sort((a,b)=>(a.start_char||0)-(b.start_char||0));
   if (!ents.length) return esc(text);
+
+  // If ALL entities lack char offsets, fall back to full text + entity chips below
+  const hasOffsets = ents.some(e => e.start_char != null && e.end_char != null);
+  if (!hasOffsets) {
+    const chips = ents.map(e => buildEntitySpan(e)).join(" ");
+    return `${esc(text)}<div class="sent-ent-chips" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${chips}</div>`;
+  }
+
   let html = "", cur = 0;
   for (const ent of ents) {
-    const start = ent.start_char != null ? ent.start_char : text.indexOf(ent.span_text);
+    const start = ent.start_char != null ? ent.start_char : text.indexOf(ent.span_text, cur);
     const end   = ent.end_char   != null ? ent.end_char   : start + (ent.span_text||"").length;
     if (start < 0 || start < cur) continue;
     if (start > cur) html += esc(text.slice(cur, start));
