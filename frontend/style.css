@@ -328,46 +328,65 @@ body::before {
 }
 .sent-text { font-size: 13px; line-height: 1.7; }
 
-/* Entity spans */
+/* ── Entity spans & inline TP/FP toggle ─────────────── */
 .entity {
-  display: inline; cursor: pointer;
+  display: inline-block;
+  position: relative;
   border-bottom: 2px solid transparent;
   border-radius: 3px; padding: 1px 3px;
-  position: relative; transition: filter 0.12s;
+  cursor: default;
+  vertical-align: baseline;
 }
-.entity:hover { filter: brightness(0.92); }
 
-/* Verdict menu */
-.entity-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: 200;
-  background: var(--g1); border: 1px solid var(--b2);
-  border-radius: var(--r-md); box-shadow: var(--sh);
-  backdrop-filter: var(--blur); padding: 6px;
-  display: none; min-width: 170px; flex-direction: column; gap: 3px;
-  animation: popIn 0.12s ease both;
+/* Toggle bar sits above the entity text */
+.ent-toggle {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 50%; transform: translateX(-50%);
+  align-items: center; gap: 3px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.13);
+  border-radius: 20px;
+  padding: 2px 5px 2px 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  white-space: nowrap;
+  z-index: 300;
+  animation: popIn 0.1s ease both;
 }
-.entity-menu.open { display: flex; }
+.entity:hover .ent-toggle { display: inline-flex; }
+
+.ent-label-tip {
+  font: 600 9px var(--mono, monospace);
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-right: 2px;
+  max-width: 120px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+.ent-btn {
+  border: none; cursor: pointer;
+  font: 700 9.5px var(--font, sans-serif);
+  padding: 2px 7px; border-radius: 12px;
+  transition: background 0.1s, color 0.1s;
+  background: rgba(0,0,0,0.05); color: #64748b;
+}
+.ent-btn:hover { background: rgba(0,0,0,0.1); }
+.ent-tp.ent-active-tp { background: #10b981; color: #fff; }
+.ent-fp.ent-active-fp { background: #ef4444; color: #fff; }
+.ent-tp:not(.ent-active-tp):hover { background: rgba(16,185,129,0.15); color: #059669; }
+.ent-fp:not(.ent-active-fp):hover { background: rgba(239,68,68,0.12); color: #dc2626; }
+
+/* Verdict ring on the entity itself */
+.entity.verdict-tp { box-shadow: 0 0 0 1.5px #10b981; }
+.entity.verdict-fp { box-shadow: 0 0 0 1.5px #ef4444; opacity: 0.75; }
 
 @keyframes popIn {
-  from { opacity:0; transform:translateY(-4px) scale(0.97); }
-  to   { opacity:1; transform:translateY(0) scale(1); }
+  from { opacity:0; transform: translateX(-50%) translateY(3px) scale(0.95); }
+  to   { opacity:1; transform: translateX(-50%) translateY(0)   scale(1); }
 }
-
-.menu-header {
-  font: 600 10px var(--mono);
-  color: var(--t3); text-transform: uppercase;
-  letter-spacing: 0.6px; padding: 3px 7px 5px;
-  border-bottom: 1px solid var(--b3); margin-bottom: 2px;
-}
-.verdict-btn {
-  display: flex; align-items: center; gap: 7px;
-  padding: 7px 10px; border-radius: var(--r-sm); border: none;
-  font: 500 12px var(--font); cursor: pointer; text-align: left;
-  transition: background 0.12s; background: transparent; color: var(--t1);
-}
-.verdict-btn:hover { background: rgba(255,255,255,0.65); }
-.verdict-btn.active-tp { background: rgba(16,185,129,0.14); color: #065f46; }
-.verdict-btn.active-fp { background: rgba(239,68,68,0.12); color: #b91c1c; }
 
 /* Collab badges */
 .collab-badges { display: inline-flex; align-items: center; gap: 2px; margin-left: 3px; vertical-align: middle; }
