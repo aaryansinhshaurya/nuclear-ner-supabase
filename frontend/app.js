@@ -664,41 +664,24 @@ function buildSentHTML(sent) {
 function buildEntitySpan(ent) {
   const s       = getStyle(ent.label);
   const verdict = S.annotations[ent.id] || "none";
-  const isOpen  = S.openEntityId === ent.id;
   const saving  = S.saving.has(ent.id);
-  const others  = (S.allAnnotations[ent.id]||[]).filter(a => a.user_name !== S.user);
-  const collabHTML = others.map(a =>
-    `<span class="collab-badge ${a.verdict==="tp"?"cb-tp":"cb-fp"}" title="${escA(a.user_name)}: ${a.verdict}">
-       ${(a.user_name[0]||"?").toUpperCase()}<span style="font-size:8px">${a.verdict==="tp"?"✓":"✗"}</span>
-     </span>`).join("");
-  const menuHTML = `
-    <div class="entity-menu ${isOpen?"open":""}">
-      <div class="menu-header">${esc(ent.label)}</div>
-      <button class="verdict-btn ${verdict==="tp"?"active-tp":""}" ${saving?"disabled":""} onclick="setVerdict('${escA(ent.id)}','tp',event)">✓ True Positive</button>
-      <button class="verdict-btn ${verdict==="fp"?"active-fp":""}" ${saving?"disabled":""} onclick="setVerdict('${escA(ent.id)}','fp',event)">✗ False Positive</button>
-      <button class="verdict-btn" ${saving?"disabled":""} onclick="setVerdict('${escA(ent.id)}','clear',event)">– Clear</button>
-      ${others.length ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(0,0,0,.08);font-size:10px;color:var(--t2)">${others.map(a=>`<b>${esc(a.user_name)}</b>: ${a.verdict}`).join(" · ")}</div>` : ""}
-    </div>`;
-  return `<span class="entity verdict-${verdict} ${others.length?"has-collab":""}" data-type="${escA(ent.label)}" data-eid="${escA(ent.id)}" onclick="toggleMenu('${escA(ent.id)}',event)">
-    ${esc(ent.span_text)}
-    ${collabHTML ? `<span class="collab-badges" onclick="event.stopPropagation()">${collabHTML}</span>` : ""}
-    ${menuHTML}
+  const dis     = saving ? "disabled" : "";
+  // Short label: strip the "Category [SubType]" wrapper if present, show just SubType or full label
+  const bracketMatch = ent.label.match(/\[([^\]]+)\]/);
+  const shortLabel = bracketMatch ? bracketMatch[1] : ent.label;
+  const tooltip = `<span class="ent-label-tip">${esc(shortLabel)}</span>`;
+  const tpActive = verdict === "tp";
+  const fpActive = verdict === "fp";
+  const toggleBar = `<span class="ent-toggle" onclick="event.stopPropagation()">
+    ${tooltip}
+    <button class="ent-btn ent-tp ${tpActive?"ent-active-tp":""}" ${dis} onclick="setVerdict('${escA(ent.id)}','tp',event)" title="True Positive">TP</button>
+    <button class="ent-btn ent-fp ${fpActive?"ent-active-fp":""}" ${dis} onclick="setVerdict('${escA(ent.id)}','fp',event)" title="False Positive">FP</button>
   </span>`;
+  return `<span class="entity verdict-${verdict}" data-type="${escA(ent.label)}" data-eid="${escA(ent.id)}">${toggleBar}${esc(ent.span_text)}</span>`;
 }
 
-function toggleMenu(id, ev) {
-  ev.stopPropagation();
-  const prev = S.openEntityId;
-  S.openEntityId = (prev === id) ? null : id;
-  if (prev && prev !== id) rerenderEntity(prev);
-  rerenderEntity(id);
-}
-function closeMenu() {
-  if (!S.openEntityId) return;
-  const prev = S.openEntityId;
-  S.openEntityId = null;
-  rerenderEntity(prev);
-}
+function toggleMenu() {}  // no-op — kept for compatibility
+function closeMenu()   {}  // no-op
 
 async function setVerdict(id, verdict, ev) {
   ev.stopPropagation();
