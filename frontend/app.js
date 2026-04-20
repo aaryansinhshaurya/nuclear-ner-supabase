@@ -384,11 +384,27 @@ async function openProject(pid, name="") {
     if (ce) throw ce;
 
     const totalPages = Math.ceil((count || 0) / PAGE) || 1;
+
+    // Fetch sentences without nested join — avoids Supabase FK dependency
     const pageRequests = Array.from({ length: totalPages }, (_, i) =>
       sb.from("sentences")
-        .select("id, doc_id, sent_id, text, entities(model_entity_id, span_text, label, start_char, end_char)")
+        .select("id, doc_id, sent_id, text")
         .eq("project_id", pid)
         .range(i * PAGE, (i + 1) * PAGE - 1)
+        .then(({ data, error }) => { if (error) throw error; return data; })
+    );
+
+    // Fetch ALL entities for this project directly (flat, no per-sentence join)
+    const { count: entCount2, error: ece } = await sb
+      .from("entities").select("id", { count: "exact", head: true }).eq("project_id", pid);
+    if (ece) throw ece;
+    const ENT_PAGE = 5000;
+    const entTotalPages = Math.ceil((entCount2 || 0) / ENT_PAGE) || 1;
+    const entRequests = Array.from({ length: entTotalPages }, (_, i) =>
+      sb.from("entities")
+        .select("sentence_id, model_entity_id, span_text, label, start_char, end_char")
+        .eq("project_id", pid)
+        .range(i * ENT_PAGE, (i + 1) * ENT_PAGE - 1)
         .then(({ data, error }) => { if (error) throw error; return data; })
     );
 
@@ -402,19 +418,33 @@ async function openProject(pid, name="") {
       .eq("project_id", pid)
       .then(({ data, error }) => { if (error) throw error; return data; });
 
-    const allPages = await Promise.all([...pageRequests, annRequest, allAnnRequest]);
+    const allPages = await Promise.all([...pageRequests, ...entRequests, annRequest, allAnnRequest]);
     const allAnns = allPages.pop();
     const anns    = allPages.pop();
-    const sents   = allPages.flat();
+    // remaining pages: first totalPages are sentences, rest are entity pages
+    const sentPages = allPages.slice(0, totalPages);
+    const entPages  = allPages.slice(totalPages);
+    const sents     = sentPages.flat();
+    const allEnts   = entPages.flat();
 
-    // Debug: log first sentence to verify text field is populated
-    if (sents.length > 0) console.log("[NukeNER] Sample sentence:", sents[0]);
+    // Build sentence_id → entities map
+    const entsBySentId = {};
+    for (const e of allEnts) {
+      if (!entsBySentId[e.sentence_id]) entsBySentId[e.sentence_id] = [];
+      entsBySentId[e.sentence_id].push({
+        id:         e.model_entity_id,
+        model_entity_id: e.model_entity_id,
+        span_text:  e.span_text,
+        label:      e.label,
+        start_char: e.start_char,
+        end_char:   e.end_char,
+      });
+    }
 
     S.sentences = sents.map(s => ({
       id: s.id, doc_id: s.doc_id, sent_id: s.sent_id,
-      // Fallback: if text is null/empty, show a placeholder so the card isn't blank
-      text: s.text || s.sentence || "",
-      entities: (s.entities || []).map(e => ({ ...e, id: e.model_entity_id })),
+      text: s.text || "",
+      entities: entsBySentId[s.id] || [],
     }));
     for (const a of anns) S.annotations[a.model_entity_id] = a.verdict;
     for (const a of allAnns) {
@@ -511,21 +541,34 @@ function buildSentHTML(sent) {
   const ents = [...sent.entities].sort((a,b)=>(a.start_char||0)-(b.start_char||0));
   if (!ents.length) return esc(text);
 
-  // If ALL entities lack char offsets, fall back to full text + entity chips below
-  const hasOffsets = ents.some(e => e.start_char != null && e.end_char != null);
-  if (!hasOffsets) {
-    const chips = ents.map(e => buildEntitySpan(e)).join(" ");
-    return `${esc(text)}<div class="sent-ent-chips" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${chips}</div>`;
+  // Decide rendering strategy based on whether char offsets are present
+  const hasOffsets = ents.every(e => e.start_char != null && e.end_char != null);
+
+  if (hasOffsets) {
+    // Inline highlight using character offsets
+    let html = "", cur = 0;
+    for (const ent of ents) {
+      const start = ent.start_char;
+      const end   = ent.end_char;
+      if (start < cur || start >= text.length) continue;
+      if (start > cur) html += esc(text.slice(cur, start));
+      html += buildEntitySpan(ent);
+      cur = end;
+    }
+    if (cur < text.length) html += esc(text.slice(cur));
+    return html;
   }
 
+  // No offsets — search for span_text in the sentence and highlight in-place
   let html = "", cur = 0;
   for (const ent of ents) {
-    const start = ent.start_char != null ? ent.start_char : text.indexOf(ent.span_text, cur);
-    const end   = ent.end_char   != null ? ent.end_char   : start + (ent.span_text||"").length;
-    if (start < 0 || start < cur) continue;
-    if (start > cur) html += esc(text.slice(cur, start));
+    const span = ent.span_text || "";
+    if (!span) continue;
+    const idx = text.indexOf(span, cur);
+    if (idx === -1) continue;           // span not found from current pos — skip
+    if (idx > cur) html += esc(text.slice(cur, idx));
     html += buildEntitySpan(ent);
-    cur = end;
+    cur = idx + span.length;
   }
   if (cur < text.length) html += esc(text.slice(cur));
   return html;
