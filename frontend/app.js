@@ -295,9 +295,15 @@ function parseFile(text, filename) {
   const sep = ext === "tsv" ? "\t" : ",";
   const lines = text.trim().split(/\r?\n/);
   const headers = parseCsvRow(lines[0], sep).map(h => h.toLowerCase().trim());
-  const docCol  = headers.findIndex(h => h.includes("doc"));
-  const sentCol = headers.findIndex(h => h.includes("sent") || h.includes("id"));
-  const txtCol  = headers.findIndex(h => h.includes("text") || h.includes("sentence"));
+  const docCol  = headers.findIndex(h => h === "doc_id" || h === "doc" || (h.includes("doc") && !h.includes("sent")));
+  // sentence_id / sent_id — must be an ID column, not the text body
+  const sentCol = headers.findIndex(h => h === "sentence_id" || h === "sent_id" || h === "id");
+  // sentence text — exact match first, then fallback; explicitly exclude *_id columns
+  const txtCol  = (() => {
+    const exact = headers.findIndex(h => h === "sentence" || h === "text");
+    if (exact !== -1) return exact;
+    return headers.findIndex(h => (h.includes("text") || h.includes("sentence")) && !h.endsWith("_id") && !h.endsWith("id"));
+  })();
   const entCol  = headers.findIndex(h => h.includes("entit"));
   if (txtCol === -1) throw new Error("Could not find a text/sentence column in CSV.");
   return lines.slice(1).filter(Boolean).map((line, i) => {
