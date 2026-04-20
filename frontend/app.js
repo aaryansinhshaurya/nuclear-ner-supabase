@@ -347,17 +347,31 @@ function parseFile(text, filename) {
     if (entCol !== -1 && cols[entCol]) {
       try {
         let raw = cols[entCol].trim();
-        // Convert Python-style single-quoted dicts to valid JSON:
-        // '[{"text": "foo", "label": "bar"}]'  ← already fine
-        // '[{'text': 'foo', 'label': 'bar'}]'  ← Python repr, fix it
-        raw = raw
-          .replace(/'/g, '"')               // single → double quotes
-          .replace(/None/g, "null")          // Python None → JSON null
-          .replace(/True/g, "true")          // Python True → JSON true
-          .replace(/False/g, "false");       // Python False → JSON false
-        entities = normaliseEntities(JSON.parse(raw));
+        // Try standard JSON first (double-quoted)
+        let parsed = null;
+        try { parsed = JSON.parse(raw); } catch(_) {}
+
+        if (!parsed) {
+          // Python repr: single-quoted keys/values, e.g. [{'text': 'Helion', 'label': 'Org'}]
+          // Strategy: replace only single-quotes that are dict delimiters (not apostrophes in text).
+          // We do this by a targeted regex that replaces quotes around keys and values:
+          //   ' after [ { , :   →  "    (opening quote of a key or value)
+          //   ' before ] } , :  →  "    (closing quote of a key or value)
+          const fixed = raw
+            .replace(/'/g, '"')            // blanket replace all '  → "
+            .replace(/None/g, "null")
+            .replace(/True/g, "true")
+            .replace(/False/g, "false");
+          try { parsed = JSON.parse(fixed); } catch(_) {}
+        }
+
+        if (parsed && Array.isArray(parsed)) {
+          entities = normaliseEntities(parsed);
+        } else {
+          console.warn("[NukeNER] Entity parse failed row", i, "| raw:", cols[entCol]?.slice(0,120));
+        }
       } catch(parseErr) {
-        console.warn("[NukeNER] Entity parse failed on row", i, ":", parseErr.message, "| raw:", cols[entCol]?.slice(0,120));
+        console.warn("[NukeNER] Entity parse error row", i, ":", parseErr.message);
       }
     }
     return {
@@ -379,13 +393,17 @@ function normaliseArray(arr) {
 }
 
 function normaliseEntities(ents) {
-  return ents.map(e => ({
-    id:         e.id || null,
-    span_text:  e.span_text || e.text || e.word || "",
-    label:      e.label || e.entity_type || e.type || "Unknown",
-    start_char: e.start_char ?? e.start ?? null,
-    end_char:   e.end_char   ?? e.end   ?? null,
-  }));
+  return ents.map(e => {
+    const span_text = e.span_text || e.text || e.word || "";
+    const label     = e.label || e.entity_type || e.type || "Unknown";
+    return {
+      id:         e.id || null,   // will be replaced with model_entity_id from DB on load
+      span_text,
+      label,
+      start_char: e.start_char ?? e.start ?? null,
+      end_char:   e.end_char   ?? e.end   ?? null,
+    };
+  });
 }
 
 function parseCsvRow(line, sep=",") {
@@ -474,26 +492,27 @@ async function openProject(pid, name="") {
       .eq("project_id", pid)
       .then(({ data, error }) => { if (error) throw error; return data; });
 
-    const allPages = await Promise.all([...pageRequests, ...entRequests, annRequest, allAnnRequest]);
-    const allAnns = allPages.pop();
-    const anns    = allPages.pop();
-    // remaining pages: first totalPages are sentences, rest are entity pages
-    const sentPages = allPages.slice(0, totalPages);
-    const entPages  = allPages.slice(totalPages);
-    const sents     = sentPages.flat();
-    const allEnts   = entPages.flat();
+    // Fire sentences and annotations in parallel — keep entities separate so slicing is safe
+    const [sentResults, anns, allAnns] = await Promise.all([
+      Promise.all(pageRequests),
+      annRequest,
+      allAnnRequest,
+    ]);
+    const sents = sentResults.flat();
 
-    // Build sentence_id → entities map
+    // Fetch entities separately (avoids slice mis-alignment bug)
+    const allEnts = (await Promise.all(entRequests)).flat();
+
+    // Build sentence_id → entities lookup
     const entsBySentId = {};
     for (const e of allEnts) {
       if (!entsBySentId[e.sentence_id]) entsBySentId[e.sentence_id] = [];
       entsBySentId[e.sentence_id].push({
         id:         e.model_entity_id,
-        model_entity_id: e.model_entity_id,
         span_text:  e.span_text,
         label:      e.label,
-        start_char: e.start_char,
-        end_char:   e.end_char,
+        start_char: e.start_char ?? null,
+        end_char:   e.end_char   ?? null,
       });
     }
 
@@ -502,10 +521,12 @@ async function openProject(pid, name="") {
       text: s.text || "",
       entities: entsBySentId[s.id] || [],
     }));
-    for (const a of anns) S.annotations[a.model_entity_id] = a.verdict;
+    for (const a of anns)    S.annotations[a.model_entity_id] = a.verdict;
     for (const a of allAnns) {
       if (!S.allAnnotations[a.model_entity_id]) S.allAnnotations[a.model_entity_id] = [];
-      S.allAnnotations[a.model_entity_id].push({ user_name: a.user_name, verdict: a.verdict });
+      // avoid duplicates
+      if (!S.allAnnotations[a.model_entity_id].some(x => x.user_name === a.user_name))
+        S.allAnnotations[a.model_entity_id].push({ user_name: a.user_name, verdict: a.verdict });
     }
   } catch(e) {
     alert("Failed to load project: " + e.message); showModal(); return;
@@ -615,16 +636,26 @@ function buildSentHTML(sent) {
     return html;
   }
 
-  // No offsets — search for span_text in the sentence and highlight in-place
-  let html = "", cur = 0;
+  // No offsets — search for span_text in the sentence and highlight in-place.
+  // Sort by first occurrence so overlapping/out-of-order entities render correctly.
+  const located = [];
+  const textLower = text.toLowerCase();
   for (const ent of ents) {
     const span = ent.span_text || "";
     if (!span) continue;
-    const idx = text.indexOf(span, cur);
-    if (idx === -1) continue;           // span not found from current pos — skip
-    if (idx > cur) html += esc(text.slice(cur, idx));
+    // Try exact match first, then case-insensitive
+    let idx = text.indexOf(span);
+    if (idx === -1) idx = textLower.indexOf(span.toLowerCase());
+    if (idx !== -1) located.push({ ent, start: idx, end: idx + span.length });
+  }
+  // Sort by start position; remove overlaps
+  located.sort((a, b) => a.start - b.start);
+  let html = "", cur = 0;
+  for (const { ent, start, end } of located) {
+    if (start < cur) continue;          // overlaps previous — skip
+    if (start > cur) html += esc(text.slice(cur, start));
     html += buildEntitySpan(ent);
-    cur = idx + span.length;
+    cur = end;
   }
   if (cur < text.length) html += esc(text.slice(cur));
   return html;
