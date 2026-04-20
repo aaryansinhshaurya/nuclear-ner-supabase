@@ -330,63 +330,44 @@ body::before {
 
 /* ── Entity spans & inline TP/FP toggle ─────────────── */
 .entity {
-  display: inline-block;
-  position: relative;
+  display: inline;
   border-bottom: 2px solid transparent;
-  border-radius: 3px; padding: 1px 3px;
-  cursor: default;
-  vertical-align: baseline;
-}
-
-/* Toggle bar sits above the entity text */
-.ent-toggle {
-  display: none;
-  position: absolute;
-  bottom: calc(100% + 3px);
-  left: 50%; transform: translateX(-50%);
-  align-items: center; gap: 3px;
-  background: #fff;
-  border: 1px solid rgba(0,0,0,0.13);
-  border-radius: 20px;
-  padding: 2px 5px 2px 6px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  border-radius: 4px;
+  padding: 1px 2px;
   white-space: nowrap;
-  z-index: 300;
-  animation: popIn 0.1s ease both;
 }
-.entity:hover .ent-toggle { display: inline-flex; }
 
-.ent-label-tip {
-  font: 600 9px var(--mono, monospace);
-  color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  margin-right: 2px;
-  max-width: 120px;
-  overflow: hidden; text-overflow: ellipsis;
+/* TP/FP buttons sit inline right after the span text */
+.ent-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 3px;
+  vertical-align: middle;
+  opacity: 0;
+  transition: opacity 0.12s;
 }
+.entity:hover .ent-btns { opacity: 1; }
 
 .ent-btn {
-  border: none; cursor: pointer;
-  font: 700 9.5px var(--font, sans-serif);
-  padding: 2px 7px; border-radius: 12px;
+  display: inline-block;
+  border: 1px solid rgba(0,0,0,0.15);
+  cursor: pointer;
+  font: 700 8.5px/1 var(--font, sans-serif);
+  padding: 2px 5px;
+  border-radius: 8px;
   transition: background 0.1s, color 0.1s;
-  background: rgba(0,0,0,0.05); color: #64748b;
+  background: rgba(255,255,255,0.85);
+  color: #94a3b8;
 }
-.ent-btn:hover { background: rgba(0,0,0,0.1); }
-.ent-tp.ent-active-tp { background: #10b981; color: #fff; }
-.ent-fp.ent-active-fp { background: #ef4444; color: #fff; }
-.ent-tp:not(.ent-active-tp):hover { background: rgba(16,185,129,0.15); color: #059669; }
-.ent-fp:not(.ent-active-fp):hover { background: rgba(239,68,68,0.12); color: #dc2626; }
+.ent-tp:hover                { background: rgba(16,185,129,0.15); color: #059669; border-color: #10b981; }
+.ent-fp:hover                { background: rgba(239,68,68,0.12);  color: #dc2626; border-color: #ef4444; }
+.ent-tp.ent-active-tp        { background: #10b981; color: #fff; border-color: #10b981; }
+.ent-fp.ent-active-fp        { background: #ef4444; color: #fff; border-color: #ef4444; }
 
-/* Verdict ring on the entity itself */
-.entity.verdict-tp { box-shadow: 0 0 0 1.5px #10b981; }
-.entity.verdict-fp { box-shadow: 0 0 0 1.5px #ef4444; opacity: 0.75; }
-
-@keyframes popIn {
-  from { opacity:0; transform: translateX(-50%) translateY(3px) scale(0.95); }
-  to   { opacity:1; transform: translateX(-50%) translateY(0)   scale(1); }
-}
+/* Verdict state on the entity highlight itself */
+.entity.verdict-tp { outline: 1.5px solid #10b981; }
+.entity.verdict-fp { outline: 1.5px solid #ef4444; opacity: 0.7; }
 
 /* Collab badges */
 .collab-badges { display: inline-flex; align-items: center; gap: 2px; margin-left: 3px; vertical-align: middle; }
