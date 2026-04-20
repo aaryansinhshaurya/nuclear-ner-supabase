@@ -58,17 +58,41 @@ let _fi = 0;
 
 function getStyle(label) {
   if (!S.lStyle[label]) {
-    const norm = (label||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").trim();
+    const lower = (label||"").toLowerCase();
+
+    // Strategy 1: exact match (case-insensitive)
     let matched = null;
     for (const k of Object.keys(ONTOLOGY)) {
-      if (k.toLowerCase() === label.toLowerCase()) { matched = k; break; }
+      if (k.toLowerCase() === lower) { matched = k; break; }
     }
+
+    // Strategy 2: label is "Category [SubType]" — extract the bracketed part and match that
     if (!matched) {
+      const bracketMatch = label.match(/\[([^\]]+)\]/);
+      if (bracketMatch) {
+        const inner = bracketMatch[1].toLowerCase();
+        for (const k of Object.keys(ONTOLOGY)) {
+          if (k.toLowerCase() === inner) { matched = k; break; }
+        }
+        // Also try substring match on the inner bracket text
+        if (!matched) {
+          for (const k of Object.keys(ONTOLOGY)) {
+            const kn = k.toLowerCase();
+            if (inner.includes(kn) || kn.includes(inner)) { matched = k; break; }
+          }
+        }
+      }
+    }
+
+    // Strategy 3: substring fuzzy match on the full label
+    if (!matched) {
+      const norm = lower.replace(/[^a-z0-9 ]/g," ").trim();
       for (const k of Object.keys(ONTOLOGY)) {
         const kn = k.toLowerCase().replace(/[^a-z0-9 ]/g," ").trim();
         if (norm.includes(kn) || kn.includes(norm)) { matched = k; break; }
       }
     }
+
     const s = matched ? ONTOLOGY[matched] : FALLBACK[_fi++ % FALLBACK.length];
     S.lStyle[label] = s;
     const el = document.createElement("style");
@@ -79,12 +103,19 @@ function getStyle(label) {
 }
 
 function ontologyClass(label) {
-  const norm = (label||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").trim();
-  for (const [k,v] of Object.entries(ONTOLOGY)) {
-    const kn = k.toLowerCase().replace(/[^a-z0-9 ]/g," ").trim();
-    if (norm.includes(kn) || kn.includes(norm)) {
-      return {org:"Organisation & Company", device:"Fusion Device", technique:"Fusion Technique",
-              metric:"Fusion Metric", material:"Fusion Materials & Isotopes", funding:"Investment & Funding"}[v.cls]||"Other";
+  const CLS_MAP = {org:"Organisation & Company", device:"Fusion Device", technique:"Fusion Technique",
+                   metric:"Fusion Metric", material:"Fusion Materials & Isotopes", funding:"Investment & Funding"};
+  const lower = (label||"").toLowerCase();
+  // Try bracket extraction first
+  const bracketMatch = label.match(/\[([^\]]+)\]/);
+  const candidates = bracketMatch
+    ? [bracketMatch[1].toLowerCase(), lower]
+    : [lower];
+  for (const candidate of candidates) {
+    const norm = candidate.replace(/[^a-z0-9 ]/g," ").trim();
+    for (const [k,v] of Object.entries(ONTOLOGY)) {
+      const kn = k.toLowerCase().replace(/[^a-z0-9 ]/g," ").trim();
+      if (norm.includes(kn) || kn.includes(norm)) return CLS_MAP[v.cls]||"Other";
     }
   }
   return "Other";
@@ -199,6 +230,10 @@ async function handleUpload(file) {
     parsed = parseFile(text, file.name);
   } catch(e) { setUploadStatus(`❌ Parse error: ${e.message}`, true); return; }
   if (!parsed.length) { setUploadStatus("❌ No sentences found.", true); return; }
+  const totalEntsFound = parsed.reduce((n,s)=>n+s.entities.length,0);
+  console.log(`[NukeNER] Parsed: ${parsed.length} sentences, ${totalEntsFound} entities`);
+  if (parsed.length > 0) console.log("[NukeNER] Sample parsed row:", JSON.stringify(parsed[0]).slice(0,300));
+  setUploadStatus(`⏳ Parsed ${parsed.length} sentences · ${totalEntsFound} entities — uploading…`);
 
   const projectName = document.getElementById("newProjectName").value.trim()
     || file.name.replace(/\.[^.]+$/, "");
@@ -309,7 +344,22 @@ function parseFile(text, filename) {
   return lines.slice(1).filter(Boolean).map((line, i) => {
     const cols = parseCsvRow(line, sep);
     let entities = [];
-    if (entCol !== -1 && cols[entCol]) { try { entities = normaliseEntities(JSON.parse(cols[entCol])); } catch {} }
+    if (entCol !== -1 && cols[entCol]) {
+      try {
+        let raw = cols[entCol].trim();
+        // Convert Python-style single-quoted dicts to valid JSON:
+        // '[{"text": "foo", "label": "bar"}]'  ← already fine
+        // '[{'text': 'foo', 'label': 'bar'}]'  ← Python repr, fix it
+        raw = raw
+          .replace(/'/g, '"')               // single → double quotes
+          .replace(/None/g, "null")          // Python None → JSON null
+          .replace(/True/g, "true")          // Python True → JSON true
+          .replace(/False/g, "false");       // Python False → JSON false
+        entities = normaliseEntities(JSON.parse(raw));
+      } catch(parseErr) {
+        console.warn("[NukeNER] Entity parse failed on row", i, ":", parseErr.message, "| raw:", cols[entCol]?.slice(0,120));
+      }
+    }
     return {
       doc_id:   docCol  !== -1 ? cols[docCol]  : "doc_1",
       sent_id:  sentCol !== -1 ? cols[sentCol] : String(i),
@@ -339,14 +389,20 @@ function normaliseEntities(ents) {
 }
 
 function parseCsvRow(line, sep=",") {
+  // Properly handles quoted fields containing commas and embedded JSON.
+  // Strips the outer wrapping quotes but preserves inner content exactly.
   const result = []; let cur = ""; let inQ = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
-    if (ch === '"') { inQ = !inQ; continue; }
-    if (ch === sep && !inQ) { result.push(cur.trim()); cur = ""; continue; }
+    if (ch === '"') {
+      if (inQ && line[i+1] === '"') { cur += '"'; i++; continue; } // escaped ""
+      inQ = !inQ;
+      continue; // strip outer quote wrapper only
+    }
+    if (ch === sep && !inQ) { result.push(cur); cur = ""; continue; }
     cur += ch;
   }
-  result.push(cur.trim());
+  result.push(cur);
   return result;
 }
 
